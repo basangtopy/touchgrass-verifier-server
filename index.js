@@ -91,6 +91,81 @@ app.get("/health", (req, res) => {
   });
 });
 
+// ===== FARCASTER IDENTITY PROXY ENDPOINT =====
+// Proxies requests to Neynar API to keep API key secure
+const farcasterLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many identity lookups. Please try again later.",
+  },
+});
+
+app.get("/api/farcaster/:address", farcasterLimiter, async (req, res) => {
+  const { address } = req.params;
+
+  // Validate address format
+  if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid Ethereum address format",
+    });
+  }
+
+  const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
+
+  if (!NEYNAR_API_KEY) {
+    // Silently fail if Neynar not configured - identity will fallback to other sources
+    return res.status(503).json({
+      success: false,
+      message: "Farcaster lookup not available",
+    });
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.neynar.com/v2/farcaster/user/bulk-by-address?addresses=${address}`,
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          api_key: NEYNAR_API_KEY,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(`Neynar API error: ${response.status}`);
+      return res.status(response.status).json({
+        success: false,
+        message: "Farcaster lookup failed",
+      });
+    }
+
+    const data = await response.json();
+    const user = data[address.toLowerCase()]?.[0];
+
+    if (user) {
+      res.json({
+        success: true,
+        name: user.display_name || user.username,
+        avatar: user.pfp_url,
+      });
+    } else {
+      res.json({ success: false, message: "No Farcaster profile found" });
+    }
+  } catch (error) {
+    console.error("Farcaster proxy error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: "Farcaster lookup failed",
+    });
+  }
+});
+
 // ===== VERIFICATION ENDPOINT =====
 app.post("/api/verify", verifyLimiter, async (req, res) => {
   const { challengeId, title, imageUrl } = req.body;
