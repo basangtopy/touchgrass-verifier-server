@@ -192,7 +192,7 @@ app.post("/api/verify", verifyLimiter, async (req, res) => {
     });
   }
 
-  if (typeof imageUrl !== "string" || !imageUrl.startsWith("data:image/")) {
+  if (typeof imageUrl !== "string") {
     return res.status(400).json({
       success: false,
       message: "imageUrl must be a valid URL",
